@@ -1,386 +1,386 @@
-import hashlib
 import json
-import time
-from datetime import datetime, timezone
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from sklearn.metrics import (
-    average_precision_score, confusion_matrix, f1_score,
-    precision_score, recall_score, roc_auc_score
-)
-from sklearn.model_selection import train_test_split
+
+import jobs
+import ledger as ledger_module
+from data import ensure_dataset, inspect_dataset, load_frames
+from engine import RunConfig, score_transaction
+from store import load_latest
 
 st.set_page_config(page_title="CIPHERMESH | Federated Fraud Intelligence", page_icon="🔐", layout="wide")
 
-st.markdown('\n<style>\n:root {\n  --cm-navy: #0b1220;\n  --cm-panel: #111c2f;\n  --cm-teal: #19c7b5;\n  --cm-muted: #93a4ba;\n}\n.stApp { background: #f4f7fb; color: #152238; }\n[data-testid="stHeader"] { background: rgba(244,247,251,0.92); }\n[data-testid="stSidebar"] { background: #0b1220; border-right: 1px solid #22314a; }\n[data-testid="stSidebar"] * { color: #e6edf7 !important; }\n[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #aab8cc !important; }\n[data-testid="stSidebar"] button { border-radius: 10px !important; }\n.block-container { padding-top: 1.4rem; padding-bottom: 2.5rem; max-width: 1440px; }\nh1, h2, h3 { letter-spacing: -0.035em; color: #122039; }\nh1 { font-weight: 800 !important; }\n[data-testid="stMetric"] {\n  background: white; border: 1px solid #e1e8f1; border-radius: 16px;\n  padding: 16px 18px; box-shadow: 0 3px 14px rgba(18,32,57,.035);\n}\n[data-testid="stMetricLabel"] { color: #64748b !important; font-size: .83rem !important; }\n[data-testid="stMetricValue"] { color: #122039 !important; font-weight: 750 !important; }\n.stButton > button, .stDownloadButton > button {\n  border-radius: 10px; border: 1px solid #d7e0eb; font-weight: 650;\n  min-height: 2.6rem;\n}\n.stButton > button[kind="primary"] { background: #087f8c; border-color: #087f8c; color: white; }\n.stButton > button[kind="primary"]:hover { background: #066b76; border-color: #066b76; }\n[data-testid="stTabs"] button { font-weight: 650; }\n[data-testid="stDataFrame"] { border: 1px solid #e1e8f1; border-radius: 12px; overflow: hidden; }\ndiv[data-testid="stAlert"] { border-radius: 12px; }\n.cm-hero {\n  background: linear-gradient(115deg, #0b1220 0%, #142641 68%, #0d555e 100%);\n  border-radius: 22px; padding: 28px 30px; color: white; margin-bottom: 20px;\n  box-shadow: 0 12px 32px rgba(11,18,32,.13);\n}\n.cm-hero h1 { color: white !important; font-size: 2.25rem; margin: 0 0 7px 0; }\n.cm-hero p { color: #c9d6e8; margin: 0; font-size: 1rem; }\n.cm-eyebrow { color: #62e2d3; font-size: .76rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 10px; }\n.cm-chip { display: inline-block; padding: 5px 10px; border-radius: 999px; background: rgba(25,199,181,.13); color: #72e9dc; border: 1px solid rgba(25,199,181,.25); font-size: .76rem; margin-top: 16px; }\n.cm-section { border-bottom: 1px solid #e0e7f0; padding-bottom: 10px; margin: 12px 0 16px 0; }\n.cm-card {\n  background: white; border: 1px solid #e1e8f1; border-radius: 16px;\n  padding: 18px 20px; min-height: 132px; box-shadow: 0 3px 14px rgba(18,32,57,.035);\n}\n.cm-card h3 { margin: 0 0 8px 0; font-size: 1rem; color: #122039; }\n.cm-card p { margin: 0; color: #61718a; font-size: .9rem; line-height: 1.55; }\n.cm-step { color: #087f8c; font-weight: 800; font-size: .75rem; letter-spacing: .09em; margin-bottom: 8px; }\n.small-muted { color: #64748b; font-size: .86rem; }\n</style>\n', unsafe_allow_html=True)
+st.markdown("""
+<style>
+:root {
+  --cm-navy: #0b1220;
+  --cm-panel: #111c2f;
+  --cm-teal: #19c7b5;
+  --cm-muted: #93a4ba;
+}
+.stApp { background: #f4f7fb; color: #152238; }
+[data-testid="stHeader"] { background: rgba(244,247,251,0.92); }
+[data-testid="stSidebar"] { background: #0b1220; border-right: 1px solid #22314a; }
+[data-testid="stSidebar"] * { color: #e6edf7 !important; }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #aab8cc !important; }
+[data-testid="stSidebar"] button { border-radius: 10px !important; }
+.block-container { padding-top: 1.4rem; padding-bottom: 2.5rem; max-width: 1440px; }
+h1, h2, h3 { letter-spacing: -0.035em; color: #122039; }
+h1 { font-weight: 800 !important; }
+[data-testid="stMetric"] {
+  background: white; border: 1px solid #e1e8f1; border-radius: 16px;
+  padding: 16px 18px; box-shadow: 0 3px 14px rgba(18,32,57,.035);
+}
+[data-testid="stMetricLabel"] { color: #64748b !important; font-size: .83rem !important; }
+[data-testid="stMetricValue"] { color: #122039 !important; font-weight: 750 !important; }
+.stButton > button, .stDownloadButton > button {
+  border-radius: 10px; border: 1px solid #d7e0eb; font-weight: 650;
+  min-height: 2.6rem;
+}
+.stButton > button[kind="primary"] { background: #087f8c; border-color: #087f8c; color: white; }
+.stButton > button[kind="primary"]:hover { background: #066b76; border-color: #066b76; }
+[data-testid="stTabs"] button { font-weight: 650; }
+[data-testid="stDataFrame"] { border: 1px solid #e1e8f1; border-radius: 12px; overflow: hidden; }
+div[data-testid="stAlert"] { border-radius: 12px; }
+.cm-hero {
+  background: linear-gradient(115deg, #0b1220 0%, #142641 68%, #0d555e 100%);
+  border-radius: 22px; padding: 28px 30px; color: white; margin-bottom: 20px;
+  box-shadow: 0 12px 32px rgba(11,18,32,.13);
+}
+.cm-hero h1 { color: white !important; font-size: 2.25rem; margin: 0 0 7px 0; }
+.cm-hero p { color: #c9d6e8; margin: 0; font-size: 1rem; }
+.cm-eyebrow { color: #62e2d3; font-size: .76rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 10px; }
+.cm-chip { display: inline-block; padding: 5px 10px; border-radius: 999px; background: rgba(25,199,181,.13); color: #72e9dc; border: 1px solid rgba(25,199,181,.25); font-size: .76rem; margin-top: 16px; }
+.cm-section { border-bottom: 1px solid #e0e7f0; padding-bottom: 10px; margin: 12px 0 16px 0; }
+.cm-card {
+  background: white; border: 1px solid #e1e8f1; border-radius: 16px;
+  padding: 18px 20px; min-height: 132px; box-shadow: 0 3px 14px rgba(18,32,57,.035);
+}
+.cm-card h3 { margin: 0 0 8px 0; font-size: 1rem; color: #122039; }
+.cm-card p { margin: 0; color: #61718a; font-size: .9rem; line-height: 1.55; }
+.cm-step { color: #087f8c; font-weight: 800; font-size: .75rem; letter-spacing: .09em; margin-bottom: 8px; }
+.small-muted { color: #64748b; font-size: .86rem; }
+</style>
+""", unsafe_allow_html=True)
 
-FEATURES = ["amount_log", "balance_change", "is_transfer", "is_cashout", "unusual_amount"]
-LABEL = "is_fraud"
-
-
-def make_synthetic_bank_data(n=1800, seed=42, bank_id=0):
-    """Create explicitly synthetic transactions for a reproducible demo."""
-    rng = np.random.default_rng(seed + bank_id * 101)
-    amount = rng.lognormal(mean=3.0 + bank_id * 0.05, sigma=1.0, size=n)
-    txn_type = rng.choice([0, 1, 2, 3], size=n, p=[0.50, 0.22, 0.18, 0.10])
-    balance_change = amount * rng.normal(0.8, 0.35, size=n)
-    unusual_amount = (amount > np.quantile(amount, 0.88)).astype(float)
-    is_transfer = (txn_type == 1).astype(float)
-    is_cashout = (txn_type == 2).astype(float)
-
-    # Synthetic label mechanism, not a real-world fraud model.
-    logit = (
-        -5.0
-        + 0.85 * is_transfer
-        + 1.05 * is_cashout
-        + 0.55 * unusual_amount
-        + 0.18 * (balance_change / (np.median(amount) + 1e-6))
-        + rng.normal(0, 0.55, size=n)
-    )
-    prob = 1 / (1 + np.exp(-logit))
-    y = rng.binomial(1, prob)
-    X = pd.DataFrame({
-        "amount_log": np.log1p(amount),
-        "balance_change": balance_change / (np.median(amount) + 1e-6),
-        "is_transfer": is_transfer,
-        "is_cashout": is_cashout,
-        "unusual_amount": unusual_amount,
-    })
-    return X.astype(float), y.astype(int)
-
-
-def sigmoid(z):
-    z = np.clip(z, -30, 30)
-    return 1.0 / (1.0 + np.exp(-z))
-
-
-def train_local_model(X, y, initial_w, initial_b, epochs=80, lr=0.08, l2=0.002):
-    """Small transparent logistic-regression trainer using gradient descent."""
-    w = initial_w.copy()
-    b = float(initial_b)
-    n = len(y)
-    for _ in range(epochs):
-        p = sigmoid(X @ w + b)
-        error = p - y
-        grad_w = (X.T @ error) / n + l2 * w
-        grad_b = float(np.mean(error))
-        w -= lr * grad_w
-        b -= lr * grad_b
-    return w, b
-
-
-def fedavg(updates):
-    """Weighted average of compatible model parameters only; no transaction rows."""
-    total = sum(item["n"] for item in updates)
-    if total <= 0:
-        raise ValueError("No training samples to aggregate.")
-    shapes = {item["w"].shape for item in updates}
-    if len(shapes) != 1:
-        raise ValueError("Incompatible model parameter shapes.")
-    w = sum((item["n"] / total) * item["w"] for item in updates)
-    b = sum((item["n"] / total) * item["b"] for item in updates)
-    return w, float(b)
-
-
-def metrics_for(y, probabilities, threshold):
-    pred = (probabilities >= threshold).astype(int)
-    return {
-        "Precision": precision_score(y, pred, zero_division=0),
-        "Recall": recall_score(y, pred, zero_division=0),
-        "F1": f1_score(y, pred, zero_division=0),
-        "PR-AUC (Average Precision)": average_precision_score(y, probabilities) if len(np.unique(y)) > 1 else float("nan"),
-        "ROC-AUC": roc_auc_score(y, probabilities) if len(np.unique(y)) > 1 else float("nan"),
-        "Fraud examples": int(np.sum(y)),
-        "Test transactions": int(len(y)),
-    }
-
-
-def add_ledger_event(ledger, event_type, actor, details):
-    previous_hash = ledger[-1]["hash"] if ledger else "GENESIS"
-    body = {
-        "event_id": len(ledger) + 1,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "event_type": event_type,
-        "actor": actor,
-        "details": details,
-        "previous_hash": previous_hash,
-    }
-    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
-    body["hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    ledger.append(body)
-
-
-def verify_ledger(ledger):
-    prev = "GENESIS"
-    for idx, event in enumerate(ledger, start=1):
-        if event.get("event_id") != idx or event.get("previous_hash") != prev:
-            return False
-        body = {k: v for k, v in event.items() if k != "hash"}
-        canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
-        expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        if event.get("hash") != expected:
-            return False
-        prev = event["hash"]
-    return True
-
-
-def prepare_banks(n_banks=5, rows_per_bank=1800, seed=42):
-    banks = {}
-    for i in range(n_banks):
-        X, y = make_synthetic_bank_data(rows_per_bank, seed, i)
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.25, random_state=seed + i,
-            stratify=y if len(np.unique(y)) > 1 and min(np.bincount(y)) >= 2 else None
-        )
-        banks[f"Bank {chr(65+i)}"] = {
-            "X_train": X_train.to_numpy(dtype=float),
-            "y_train": y_train,
-            "X_test": X_test.to_numpy(dtype=float),
-            "y_test": y_test,
-        }
-    return banks
-
-
-def run_experiment(banks, rounds, epochs, lr, threshold, clip_norm, noise_scale, use_protection):
-    rng = np.random.default_rng(123)
-    global_w = np.zeros(len(FEATURES), dtype=float)
-    global_b = 0.0
-    ledger = []
-    transfer_rows = 0
-    update_count = 0
-    clipping_records = []
-    bank_local = {}
-    for name, data in banks.items():
-        w, b = train_local_model(data["X_train"], data["y_train"], np.zeros(len(FEATURES)), 0.0, epochs, lr)
-        bank_local[name] = (w, b)
-
-    add_ledger_event(ledger, "EXPERIMENT_STARTED", "Coordinator", {
-        "banks": len(banks), "rounds": rounds, "dataset": "synthetic demo data"
-    })
-
-    round_records = []
-    for round_num in range(1, rounds + 1):
-        updates = []
-        for name, data in banks.items():
-            local_w, local_b = train_local_model(
-                data["X_train"], data["y_train"], global_w, global_b, epochs, lr
-            )
-            delta_w = local_w - global_w
-            delta_b = local_b - global_b
-
-            norm = float(np.sqrt(np.sum(delta_w ** 2) + delta_b ** 2))
-            clipped = False
-            if use_protection and norm > clip_norm:
-                factor = clip_norm / (norm + 1e-12)
-                delta_w = delta_w * factor
-                delta_b = delta_b * factor
-                clipped = True
-
-            if use_protection and noise_scale > 0:
-                delta_w = delta_w + rng.normal(0, noise_scale, size=delta_w.shape)
-                delta_b = float(delta_b + rng.normal(0, noise_scale))
-
-            protected_w = global_w + delta_w
-            protected_b = global_b + delta_b
-            updates.append({"w": protected_w, "b": protected_b, "n": len(data["y_train"]), "bank": name})
-            update_count += 1
-            clipping_records.append({
-                "Round": round_num, "Bank": name, "Original update norm": norm,
-                "Clipped": clipped, "Noise scale": noise_scale if use_protection else 0.0
-            })
-            add_ledger_event(ledger, "MODEL_UPDATE_SUBMITTED", name, {
-                "round": round_num, "training_examples": len(data["y_train"]),
-                "raw_transaction_rows_sent": 0, "update_norm": round(norm, 6),
-                "clipped": clipped, "noise_scale": noise_scale if use_protection else 0.0
-            })
-
-        global_w, global_b = fedavg(updates)
-        add_ledger_event(ledger, "FEDAVG_COMPLETED", "Coordinator", {
-            "round": round_num, "updates_aggregated": len(updates),
-            "raw_transaction_rows_received": 0
-        })
-        round_records.append({"Round": round_num, "Updates aggregated": len(updates)})
-
-    results = []
-    for name, data in banks.items():
-        local_w, local_b = bank_local[name]
-        local_prob = sigmoid(data["X_test"] @ local_w + local_b)
-        global_prob = sigmoid(data["X_test"] @ global_w + global_b)
-        lm = metrics_for(data["y_test"], local_prob, threshold)
-        fm = metrics_for(data["y_test"], global_prob, threshold)
-        for model_name, m in [("Local-only", lm), ("Federated", fm)]:
-            row = {"Bank": name, "Model": model_name, **m}
-            results.append(row)
-        add_ledger_event(ledger, "BANK_EVALUATION_COMPLETED", name, {
-            "test_transactions": len(data["y_test"]), "raw_transaction_rows_sent": 0
-        })
-
-    add_ledger_event(ledger, "EXPERIMENT_COMPLETED", "Coordinator", {
-        "raw_transaction_rows_sent": transfer_rows, "model_updates_submitted": update_count
-    })
-    return {
-        "results": pd.DataFrame(results),
-        "ledger": ledger,
-        "clipping": pd.DataFrame(clipping_records),
-        "rounds": pd.DataFrame(round_records),
-        "global_w": global_w,
-        "global_b": global_b,
-        "update_count": update_count,
-        "raw_rows_sent": transfer_rows,
-        "banks": banks,
-        "threshold": threshold,
-    }
-
-
-if "experiment" not in st.session_state:
-    st.session_state.experiment = None
 if "tamper_demo" not in st.session_state:
     st.session_state.tamper_demo = False
+if "shown_job" not in st.session_state:
+    st.session_state.shown_job = None
+
+
+@st.cache_resource(show_spinner="Checking the official dataset cache…")
+def backend_startup():
+    try:
+        paths = ensure_dataset(offline=True)
+    except FileNotFoundError:
+        paths = ensure_dataset(offline=False)
+    return inspect_dataset(paths)
+
+
+try:
+    DATA_FACTS = backend_startup()
+    BACKEND_READY = True
+except Exception as exc:  # noqa: BLE001 - surfaced to the user below
+    DATA_FACTS = {}
+    BACKEND_READY = False
+    BACKEND_ERROR = f"{type(exc).__name__}: {exc}"
+
 
 st.markdown("""
 <div class="cm-hero">
   <div class="cm-eyebrow">Federated fraud intelligence · CSB-04</div>
   <h1>🔐 CIPHERMESH</h1>
   <p>Collaborative fraud learning. Raw transaction rows stay within each simulated bank.</p>
-  <span class="cm-chip">PROTOTYPE ENVIRONMENT · SYNTHETIC DATA</span>
+  <span class="cm-chip">OFFICIAL PAYSIM-BANKS DATASET · SYNTHETIC TRANSACTIONS</span>
 </div>
 """, unsafe_allow_html=True)
-st.markdown('<div class="cm-section"><h3>Experiment workspace</h3><div class="small-muted">Train local models, aggregate updates, and evaluate performance bank by bank.</div></div>', unsafe_allow_html=True)
+
+
+def run_view() -> None:
+    result, ledger, saved_at = jobs.latest_completed()
+    st.session_state["result"] = result
+    st.session_state["ledger"] = ledger
+    st.session_state["saved_at"] = saved_at
+    return result, ledger, saved_at
+
+
+def results_long(result) -> pd.DataFrame:
+    rows = []
+    for bank, models in result["per_bank"].items():
+        for model_name in ("local", "federated", "pooled"):
+            m = models[model_name]
+            rows.append({
+                "Bank": f"Bank {bank}", "Model": model_name.title(),
+                "Precision": m["precision"], "Recall": m["recall"], "F1": m["f1"],
+                "PR-AUC": m["pr_auc"], "Threshold": m["threshold"],
+                "Fraud flagged": m["flagged_rows"], "Fraud actual": m["fraud_rows"],
+                "Test rows": m["test_rows"],
+            })
+    return pd.DataFrame(rows)
+
+
+if not BACKEND_READY:
+    st.error(f"The official dataset could not be loaded: {BACKEND_ERROR}")
+    st.info("First run downloads the official Parquet shards (~276 MB) from "
+            "https://huggingface.co/datasets/flwrlabs/fed-fraud-paysim-banks "
+            "into `.cache/fedguard/`. Check network access or re-run `python data.py`.")
+    st.stop()
 
 with st.sidebar:
     st.markdown("## 🔐 CIPHERMESH")
     st.markdown("**Federated Fraud Intelligence**")
     st.markdown('<div class="small-muted">CSB-04 · Hackathon prototype</div>', unsafe_allow_html=True)
+    st.caption(f"Dataset: {DATA_FACTS['total_rows']:,} official transactions · "
+               f"{DATA_FACTS['total_fraud_rows']:,} fraud")
     st.divider()
     st.header("Experiment settings")
-    n_banks = st.selectbox("Simulated banks", [3, 4, 5], index=2)
-    rows_per_bank = st.slider("Synthetic transactions per bank", 500, 3000, 1800, step=100)
-    rounds = st.slider("Federated rounds", 1, 8, 3)
-    epochs = st.slider("Local training epochs per round", 20, 150, 80, step=10)
-    lr = st.slider("Learning rate", 0.01, 0.20, 0.08, step=0.01)
-    threshold = st.slider("Fraud review threshold", 0.10, 0.90, 0.50, step=0.05)
+    st.markdown('<div class="small-muted">Every option below feeds the actual training, '
+                'aggregation and evaluation pipeline.</div>', unsafe_allow_html=True)
+    available_banks = sorted(int(b) for b in DATA_FACTS["banks"])
+    n_banks = st.selectbox("Participating banks (from dataset)", [1, 2, 3, 4, 5], index=4,
+                           help="Subset of the dataset BankID partitions (0…4).")
+    rows_per_bank = st.slider("Bounded training rows per bank", 500, 12000, 4000, step=500)
+    rounds = st.slider("Federated rounds", 1, 30, 20)
+    epochs = st.slider("Local gradient epochs per round", 1, 20, 5)
+    lr = st.slider("Learning rate", 0.02, 0.30, 0.10, step=0.02)
     use_protection = st.checkbox("Enable update clipping / optional noise", value=True)
-    clip_norm = st.slider("Update clipping norm", 0.05, 2.00, 0.50, step=0.05)
-    noise_scale = st.slider("Gaussian noise scale (0 = off)", 0.0, 0.20, 0.0, step=0.01)
-    run_button = st.button("🚀 Run federated experiment", type="primary", use_container_width=True)
+    clip_norm = st.slider("Update clipping norm", 0.05, 2.00, 1.00, step=0.05, disabled=not use_protection)
+    noise_scale = st.slider("Gaussian noise multiplier (0 = off)", 0.0, 2.0, 0.5, step=0.1, disabled=not use_protection)
+    include_balances = st.checkbox("Include balance columns (leakage sensitivity)", value=False)
+    run_button = st.button("🚀 Run federated experiment", type="primary", width="stretch")
+    if run_button:
+        config = RunConfig(
+            sample_per_bank=int(rows_per_bank), rounds=int(rounds), local_epochs=int(epochs),
+            learning_rate=float(lr), include_balances=bool(include_balances),
+            use_protection=bool(use_protection), clip_norm=float(clip_norm),
+            dp_noise_multiplier=float(noise_scale), seed=42,
+        )
+        jobs.start_job(config.__dict__)
+        st.success(f"Experiment queued: {jobs.latest_job()['id']}")
     st.caption("Clipping/noise are experimental controls—not a formal differential-privacy guarantee.")
     st.caption("Demo only: no real bank connection or production security controls.")
 
-if run_button:
-    with st.spinner("Training simulated banks and aggregating model updates..."):
-        banks = prepare_banks(n_banks, rows_per_bank, seed=42)
-        st.session_state.experiment = run_experiment(
-            banks, rounds, epochs, lr, threshold, clip_norm, noise_scale, use_protection
-        )
-    st.session_state.tamper_demo = False
 
-exp = st.session_state.experiment
+@st.fragment(run_every="1.5s")
+def live_progress() -> None:
+    job = jobs.latest_job()
+    if job and job["status"] in ("queued", "running"):
+        placeholder = st.empty()
+        with placeholder.container():
+            st.progress(min(1.0, max(0.0, job["progress"])), text=job["message"])
+            st.caption(f"Background job {job['id']} — the app stays responsive.")
+        if job["status"] == "complete":
+            if st.session_state.get("shown_job") != job["id"]:
+                st.session_state.shown_job = job["id"]
+                st.rerun(scope="app")
+    elif job and job["status"] == "failed":
+        st.error(f"Experiment failed: {job['error']}")
+    elif job and job["status"] == "complete" and st.session_state.get("shown_job") != job["id"]:
+        st.session_state.shown_job = job["id"]
+        st.rerun(scope="app")
 
-if exp is None:
-    st.info("Choose settings in the sidebar and click **Run federated experiment** to train the models and calculate real metrics.")
+
+live_progress()
+
+result, ledger, saved_at = jobs.latest_completed()
+st.session_state["result"] = result
+st.session_state["ledger"] = ledger
+st.session_state["saved_at"] = saved_at
+
+st.markdown('<div class="cm-section"><h3>Experiment workspace</h3>'
+            '<div class="small-muted">Train local models, aggregate model updates, and evaluate '
+            'performance on the official held-out split — bank by bank.</div></div>',
+            unsafe_allow_html=True)
+
+if result is None:
+    st.info("Choose settings in the sidebar and click **Run federated experiment** to train against "
+            "the official dataset and calculate real metrics.")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Raw rows sent to coordinator", "—")
-    c2.metric("Federated rounds", "—")
-    c3.metric("Simulated banks", str(n_banks))
+    c1.metric("Official transactions", f"{DATA_FACTS['total_rows']:,}")
+    c2.metric("Raw rows sent to coordinator", "0")
+    c3.metric("Status", "Awaiting run")
     st.markdown("### What this prototype demonstrates")
-    st.markdown("1. Each simulated bank trains on its own local partition.\n2. Only model parameters are passed to the FedAvg coordinator.\n3. A shared model is evaluated separately on each bank's held-out test set.\n4. A hash-linked ledger records the workflow.")
-    st.warning("This demo generates synthetic transactions. It is not connected to real banks and does not prove real-world fraud detection performance.")
+    st.markdown("1. Each simulated bank trains on its official `BankID` partition locally.\n"
+                "2. Only model parameters and approved metadata are passed to the FedAvg coordinator.\n"
+                "3. A shared model is evaluated separately on each bank's held-out test set.\n"
+                "4. A hash-linked ledger records every step, and artifacts persist to disk.")
+    st.warning("This app uses the official PaySim (synthetic) dataset. It is not connected to real "
+               "banks and does not prove real-world fraud-detection performance.")
 else:
-    results = exp["results"]
-    federated = results[results["Model"] == "Federated"]
-    local = results[results["Model"] == "Local-only"]
-    avg_f1_fed = float(federated["F1"].mean())
-    avg_f1_local = float(local["F1"].mean())
+    st.caption(f"Reloaded from saved artifacts · saved {saved_at} · verified ledger: "
+               f"{'PASS' if ledger and ledger_module.verify_ledger(ledger) else 'FAIL'}")
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Simulated banks", len(exp["banks"]))
-    m2.metric("Federated rounds", len(exp["rounds"]))
-    m3.metric("Raw rows sent to coordinator", exp["raw_rows_sent"])
-    m4.metric("Model updates submitted", exp["update_count"])
-    st.caption("The raw-row count is measured for this in-process simulation's coordinator interface. It is not a claim of production security.")
+    m1.metric("Participating banks", str(len(result["per_bank"])))
+    m2.metric("FedAvg rounds", str(result["config"]["rounds"]))
+    m3.metric("Raw rows sent to coordinator", f"{result['raw_transaction_rows_sent_to_coordinator']:,}")
+    m4.metric("Model updates submitted", f"{result['model_updates_submitted']:,}")
 
-    tabs = st.tabs(["Overview & metrics", "Bank Divergence Radar", "Privacy & Trust Ledger", "Risk scoring demo", "Implementation notes"])
+    tabs = st.tabs(["Overview & metrics", "Data Explorer", "Bank Divergence",
+                    "Privacy & Trust Ledger", "Risk scoring demo", "Implementation notes"])
 
     with tabs[0]:
         st.markdown("### Experiment summary")
-        col1, col2 = st.columns(2)
-        col1.metric("Mean F1 — local-only", f"{avg_f1_local:.3f}")
-        col2.metric("Mean F1 — federated", f"{avg_f1_fed:.3f}", delta=f"{avg_f1_fed-avg_f1_local:+.3f}")
-        st.caption("Measured on generated synthetic data only. These results are not evidence of performance on real banking transactions.")
-        bank_summary = results.pivot(index="Bank", columns="Model", values=["Precision", "Recall", "F1", "PR-AUC (Average Precision)"])
-        st.dataframe(bank_summary.round(3), use_container_width=True)
+        metrics = result["metrics"]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Pooled baseline PR-AUC", f"{metrics['pooled']['pr_auc']:.4f}")
+        c2.metric("Local-only PR-AUC", f"{metrics['local']['pr_auc']:.4f}")
+        c3.metric("Federated PR-AUC", f"{metrics['federated']['pr_auc']:.4f}")
+        st.caption("PR-AUC (average precision) on the full official test split at natural fraud "
+                   "prevalence. Absolute values are small because real fraud is rare (~0.13%).")
+        st.markdown("#### Thresholds (tuned on validation, never on test)")
+        thr = result["thresholds"]
+        st.dataframe(pd.DataFrame([
+            {"Model": name.title(), "Review threshold": value,
+             "Test PR-AUC": result["metrics"][name]["pr_auc"],
+             "Test recall": result["metrics"][name]["recall"],
+             "Test F1": result["metrics"][name]["f1"]}
+            for name, value in thr.items()
+        ]), hide_index=True, width="stretch")
+        st.markdown("#### Confusion-matrix counts at the tuned threshold (full test split)")
+        st.dataframe(pd.DataFrame([
+            {"Model": name.title(), "TP": mval["tp"], "FP": mval["fp"],
+             "TN": mval["tn"], "FN": mval["fn"], "Fraud actual": mval["fraud_rows"],
+             "Fraud flagged": mval["flagged_rows"]}
+            for name, mval in metrics.items()
+        ]), hide_index=True, width="stretch")
+        st.markdown("#### Per-bank comparison")
+        st.dataframe(results_long(result), hide_index=True, width="stretch")
         st.markdown("### Workflow")
-        st.markdown("**Local data → local model updates → FedAvg coordinator → shared model → bank-wise evaluation**")
-        chart = px.bar(results, x="Bank", y="F1", color="Model", barmode="group", title="F1-score by simulated bank")
-        st.plotly_chart(chart, use_container_width=True)
+        st.markdown("**Local data → local model updates → weighted FedAvg coordinator → shared "
+                    "model → bank-wise held-out evaluation**")
+        chart = px.bar(results_long(result), x="Bank", y="F1", color="Model", barmode="group",
+                       title="F1-score by simulated bank (official test split)")
+        st.plotly_chart(chart, width="stretch")
 
     with tabs[1]:
-        st.markdown("### Bank Divergence Radar")
-        metric = st.selectbox("Metric to compare", ["PR-AUC (Average Precision)", "Recall", "Precision", "F1", "ROC-AUC"])
-        radar_data = results[["Bank", "Model", metric]].copy()
-        st.plotly_chart(px.bar(radar_data, x="Bank", y=metric, color="Model", barmode="group", title=f"{metric}: local-only vs federated"), use_container_width=True)
-        pivot = results.pivot(index="Bank", columns="Model", values=metric)
-        if "Federated" in pivot and "Local-only" in pivot:
-            delta_df = (pivot["Federated"] - pivot["Local-only"]).rename("Federated minus local-only").reset_index()
-            st.dataframe(delta_df.round(4), use_container_width=True)
-        st.caption("Federated learning is not guaranteed to improve every bank. Interpret small synthetic experiments cautiously.")
+        st.markdown("### Official dataset structure")
+        st.caption(f"Dataset: {DATA_FACTS['dataset_id']} · "
+                   f"train {DATA_FACTS['splits']['train']['rows']:,} rows · "
+                   f"test {DATA_FACTS['splits']['test']['rows']:,} rows")
+        st.markdown("#### Observed schema")
+        st.dataframe(pd.DataFrame(DATA_FACTS["schema"]["train"]), hide_index=True, width="stretch")
+        st.markdown("#### Per-bank distribution")
+        banks = pd.DataFrame([
+            {"BankID": b, "Transactions": v["rows"], "Fraud labels": v["fraud_rows"],
+             "Fraud rate": v["fraud_rate"], "Mean amount": v["mean_amount"]}
+            for b, v in DATA_FACTS["banks"].items()
+        ])
+        st.dataframe(banks, hide_index=True, width="stretch")
+        st.bar_chart(banks.set_index("BankID")[["Fraud rate"]], color="#087f8c")
+        st.markdown("#### Feature hygiene used for training")
+        st.write("Excluded from features: **isFraud** (target), **isFlaggedFraud** (rule leakage), "
+                 "**BankID** (partition key) and customer identifiers **nameOrig/nameDest**. "
+                 "Balance columns are excluded by default (measured task leakage).")
+        if st.button("Load a reproducible 2,000-row view (from offline cache)"):
+            with st.spinner("Reading rows from the offline cache"):
+                train, _ = load_frames(offline=True,
+                                       columns=["step", "type", "amount", "isFraud", "BankID"])
+                view = train.sample(n=min(2000, len(train)), random_state=42)
+            st.dataframe(view, hide_index=True, width="stretch")
 
-    with tabs[2]:
+    with tabs[1 + 1]:  # Bank Divergence
+        long = results_long(result)
+        metric = st.selectbox("Metric to compare", ["PR-AUC", "Recall", "Precision", "F1"])
+        st.plotly_chart(px.bar(long, x="Bank", y=metric, color="Model", barmode="group",
+                               title=f"{metric}: local-only vs federated vs pooled"),
+                        width="stretch")
+        focus_bank = st.selectbox("Focus on one bank", sorted(long["Bank"].unique()))
+        piv = (long[long["Bank"] == focus_bank]
+               .set_index("Model")[["Precision", "Recall", "F1", "PR-AUC", "Fraud flagged", "Fraud actual"]])
+        st.dataframe(piv.round(4), width="stretch")
+        st.caption("Federated learning is not guaranteed to improve every bank. Interpret "
+                   "synthetics with care.")
+
+    with tabs[1 + 2]:  # Privacy & Trust Ledger
         st.markdown("### Privacy Transparency Panel")
         p1, p2, p3 = st.columns(3)
-        p1.metric("Raw transaction rows sent", exp["raw_rows_sent"])
-        p2.metric("Model updates submitted", exp["update_count"])
-        p3.metric("Ledger integrity", "PASS" if verify_ledger(exp["ledger"]) else "FAIL")
-        st.write("**What the coordinator receives:** compatible model parameters and limited metadata. In this prototype, raw transaction rows are not passed into `fedavg()`.")
-        st.warning("Model updates can still reveal information. Zero raw rows sent does not mean zero privacy risk. This local simulation does not implement secure aggregation, network transport security, authentication, or formal differential privacy.")
-        st.markdown("### Update protection measurements")
-        st.dataframe(exp["clipping"].round(4), use_container_width=True)
+        p1.metric("Raw transaction rows sent", f"{result['raw_transaction_rows_sent_to_coordinator']:,}")
+        p2.metric("Model updates submitted", f"{result['model_updates_submitted']:,}")
+        p3.metric("Ledger integrity", "PASS" if ledger and ledger_module.verify_ledger(ledger) else "FAIL")
+        st.write("**What the coordinator receives:** sample-count-weighted model deltas plus approved "
+                 "metadata (bank id, row count, feature schema). Raw transaction rows are never passed "
+                 "to aggregation.")
+        st.json(result["privacy"])
+        st.warning("Model updates can still reveal information. Zero raw rows does not mean zero "
+                   "privacy risk. This local simulation implements neither secure aggregation, "
+                   "network transport security, nor a formal differential-privacy guarantee; "
+                   "the reported epsilon is a conservative composition estimate.")
         st.markdown("### Hash-linked Trust Ledger")
-        ledger_df = pd.DataFrame(exp["ledger"])
-        st.dataframe(ledger_df[["event_id", "timestamp_utc", "event_type", "actor", "details", "previous_hash", "hash"]], use_container_width=True)
-        st.button("Demonstrate tamper detection", on_click=lambda: st.session_state.update(tamper_demo=True))
+        ledger_df = pd.DataFrame(ledger)
+        st.dataframe(ledger_df[["event_id", "timestamp_utc", "event_type", "actor", "details",
+                                "previous_hash", "hash"]], width="stretch")
+        st.button("Demonstrate tamper detection",
+                  on_click=lambda: st.session_state.update(tamper_demo=True))
         if st.session_state.tamper_demo:
-            altered = [dict(event) for event in exp["ledger"]]
-            if altered:
-                altered[0]["actor"] = "Modified event"
-            st.error("Modified ledger verification: " + ("PASS (unexpected)" if verify_ledger(altered) else "FAIL — tampering detected"))
+            altered = ledger_module.demo_tamper(ledger)
+            st.error("Modified ledger verification: " +
+                     ("PASS (unexpected)" if ledger_module.verify_ledger(altered)
+                      else "FAIL — tampering detected"))
+        st.download_button("Download experiment metrics (CSV)",
+                           data=results_long(result).to_csv(index=False).encode("utf-8"),
+                           file_name="ciphermesh_metrics.csv", mime="text/csv")
+        st.download_button("Download audit ledger (JSON)",
+                           data=json.dumps(ledger, indent=2).encode("utf-8"),
+                           file_name="ciphermesh_audit_ledger.json", mime="application/json")
+        st.download_button("Download model artifact (JSON)",
+                           data=json.dumps(result["pooled_model"], indent=2).encode("utf-8"),
+                           file_name="ciphermesh_model.json", mime="application/json")
 
-        st.download_button(
-            "Download experiment metrics (CSV)",
-            data=results.to_csv(index=False).encode("utf-8"),
-            file_name="ciphermesh_metrics.csv",
-            mime="text/csv"
-        )
-        st.download_button(
-            "Download audit ledger (JSON)",
-            data=json.dumps(exp["ledger"], indent=2).encode("utf-8"),
-            file_name="ciphermesh_audit_ledger.json",
-            mime="application/json"
-        )
+    with tabs[1 + 3]:  # Risk scoring demo
+        st.markdown("### Risk scoring (uses the persisted trained model)")
+        model = result["pooled_model"]
+        st.caption("Scores come from the pooled model actually trained above; nothing is fabricated. "
+                   "A risk score is not proof of fraud.")
+        with st.form("score_form"):
+            fields = st.columns(3)
+            numeric_inputs = {}
+            for index, numeric_column in enumerate(model["numeric_columns"]):
+                if index < 3:
+                    with fields[index]:
+                        label = {"step": "Step", "amount": "Amount"}.get(numeric_column, numeric_column)
+                        value = st.number_input(label, min_value=0.0,
+                                                value=1000.0 if numeric_column == "amount" else 0.0)
+                        numeric_inputs[numeric_column] = value
+            balance_cols = [column for column in model["numeric_columns"] if column.startswith("old") or column.startswith("new")]
+            submitted_type = st.selectbox("Transaction type", list(model["type_categories"]))
+            for column in balance_cols:
+                numeric_inputs[column] = st.number_input(f"{column} balance", min_value=0.0, value=0.0)
+            submitted = st.form_submit_button("Score transaction", type="primary")
+        if submitted:
+            values = {**numeric_inputs, "type": submitted_type}
+            score = score_transaction(values, model)
+            threshold = result["thresholds"]["pooled"]
+            risk = "Elevated — flag for review" if score >= threshold else "Lower"
+            st.metric("Model fraud score", f"{score:.4%}")
+            st.write(f"Risk band: **{risk}** (pooled review threshold {threshold:.2f})")
+            if score >= threshold:
+                st.error("Flag for review.")
+            else:
+                st.success("Below the review threshold.")
 
-    with tabs[3]:
-        st.markdown("### Risk scoring demo")
-        st.caption("Illustrative input only. This is a score from the synthetic demo model, not a bank decision.")
-        amount_log = st.slider("Log-scaled transaction amount", 0.0, 12.0, 5.0, step=0.1)
-        balance_change = st.slider("Normalised balance change", -2.0, 8.0, 1.0, step=0.1)
-        is_transfer = st.selectbox("Transfer transaction?", [0, 1], format_func=lambda x: "Yes" if x else "No")
-        is_cashout = st.selectbox("Cash-out transaction?", [0, 1], format_func=lambda x: "Yes" if x else "No")
-        unusual_amount = st.selectbox("Unusually large amount?", [0, 1], format_func=lambda x: "Yes" if x else "No")
-        sample = np.array([[amount_log, balance_change, is_transfer, is_cashout, unusual_amount]], dtype=float)
-        risk = float(sigmoid(sample @ exp["global_w"] + exp["global_b"])[0])
-        st.metric("Demo fraud-risk score", f"{risk:.1%}")
-        if risk >= exp["threshold"]:
-            st.error("Flag for review — score is at or above the selected threshold.")
-        else:
-            st.success("Below the selected review threshold.")
-        st.caption("A risk score is not proof of fraud. Real deployment requires validated features, calibration, monitoring, and human investigation.")
-
-    with tabs[4]:
+    with tabs[1 + 4]:  # Implementation notes
         st.markdown("### What is implemented")
-        st.markdown("- Five simulated bank partitions (configurable to 3–5).\n- Local logistic-regression-style training using gradient descent.\n- Sample-count-weighted FedAvg over compatible model parameters.\n- Local-only vs federated evaluation by bank.\n- Precision, recall, F1, PR-AUC, ROC-AUC and fraud counts.\n- Optional clipping and Gaussian noise experiment.\n- Hash-linked ledger and tamper-detection demonstration.\n- Downloadable metrics and audit events.")
+        st.markdown("- Official dataset loading with offline cache (`data.py`).\n"
+                    "- Fixed-order feature engineering with target/leakage/identifier exclusion (`preprocess.py`).\n"
+                    "- Simulated bank clients that submit only model updates + metadata (`banks.py`).\n"
+                    "- Sample-count-weighted FedAvg with schema/shape/finiteness checks (`privacy.py`).\n"
+                    "- Local-only, federated and pooled baselines with the same optimizer and epoch budget (`engine.py`).\n"
+                    "- Threshold tuning on validation; prec/recall/F1/PR-AUC/confusion counts on held-out test.\n"
+                    "- Optional clipping + Gaussian noise and a conservative epsilon estimate (not formal DP).\n"
+                    "- Hash-linked audit ledger with tamper detection (`ledger.py`).\n"
+                    "- Atomic artifact persistence and reload across sessions (`store.py`, `jobs.py`).")
         st.markdown("### What is not implemented")
-        st.markdown("- Real bank connections or distributed servers.\n- Real customer transaction data.\n- Secure aggregation, TLS, authentication, access controls, or production monitoring.\n- Formal differential privacy guarantees or privacy accounting.\n- Proof that federated learning improves real-world fraud detection.")
+        st.markdown("- Real bank connections or distributed servers.\n"
+                    "- Secure aggregation, TLS, authentication, access controls or production monitoring.\n"
+                    "- Formal differential-privacy guarantees or privacy accounting for sampling.\n"
+                    "- Proof that federated learning improves fraud detection in the real world.")
         st.markdown("### Judge-ready explanation")
-        st.info("Each simulated bank trains on its own local transaction partition. The coordinator receives model parameters rather than raw transaction rows and combines compatible parameters using sample-count-weighted Federated Averaging. We then compare the local-only and shared models on each bank's held-out test set. This prototype uses synthetic data, so the results demonstrate the workflow rather than real-world banking performance.")
+        st.info("Each simulated bank trains on its own official PaySim partition. The coordinator "
+                "receives sample-count-weighted model deltas plus approved metadata — never raw "
+                "transaction rows — and combines them with federated averaging. Every model family "
+                "uses the same optimizer, epoch budget, held-out evaluation policy and threshold "
+                "tuning rule, using the official synthetic dataset. Results demonstrate the "
+                "workflow, not real banking performance.")
