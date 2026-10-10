@@ -147,3 +147,4 @@ noise multiplier 0.5, delta 1e-5) is a conservative epsilon upper bound of
 4. Low absolute metrics reflect a hard, rare-event task; feature engineering or a
    gradient-boosted model would be the next honest step.
 5. No authentication, so the app is intended for local demonstration only.
+# CAPHIERMESH
