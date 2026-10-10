@@ -1,0 +1,10 @@
+streamlit==1.65.0
+pandas==3.0.6
+numpy==2.5.3
+scikit-learn==1.9.1
+pyarrow==25.0.1
+plotly>=5.18
+requests==2.34.2
+
+# test-only
+pytest==9.1.1
